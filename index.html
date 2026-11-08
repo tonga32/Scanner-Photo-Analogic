@@ -92,6 +92,19 @@
   .actions .btn-primary{flex:1;font-size:16px}
   .ghost{padding:12px 14px;border:1.5px solid #3a342d;border-radius:6px;font-weight:500;font-size:15px}
   .ghost[aria-pressed="true"]{border-color:var(--amber);color:var(--amber)}
+
+  [hidden]{display:none!important}
+  #editStage{overflow:visible}
+  .overlay{position:absolute;inset:0;display:none;touch-action:none}
+  .overlay.on{display:block}
+  .overlay svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .handle{position:absolute;width:48px;height:48px;margin:-24px 0 0 -24px;touch-action:none;cursor:grab;display:flex;align-items:center;justify-content:center}
+  .handle::after{content:"";width:20px;height:20px;border-radius:50%;background:var(--amber);border:2px solid #1a1204;box-shadow:0 0 0 2px rgba(255,255,255,.75)}
+  .overlay.sym .handle{display:none}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:12px 18px 4px}
+  .seg button{padding:10px;border:1.5px solid #3a342d;border-radius:6px;font-weight:500;font-size:15px}
+  .seg button[aria-pressed="true"]{border-color:var(--amber);color:var(--amber)}
+  .crop-help{margin:0;padding:12px 18px 0;color:var(--muted);font-size:14px;line-height:1.4}
 </style>
 </head>
 <body>
@@ -122,7 +135,7 @@
     <div class="controls-inner">
       <div class="strip"><div class="frames" id="camFrames"></div></div>
       <div class="row">
-        <button class="side" id="invertBtn" aria-pressed="false">Invertir<small>para negativos reales</small></button>
+        <button class="side" id="invertBtn" aria-pressed="false">Invertir<small>negativo a positivo</small></button>
         <button class="shutter" id="shutter" aria-label="Sacar foto"><span></span></button>
         <button class="side" id="flipBtn">Girar<small>cambiar cámara</small></button>
       </div>
@@ -137,17 +150,47 @@
   </header>
 
   <div class="viewport" id="editViewport">
-    <div class="stage" id="editStage"><canvas id="editCanvas"></canvas></div>
+    <div class="stage" id="editStage">
+      <canvas id="editCanvas"></canvas>
+      <div class="overlay" id="cropOverlay">
+        <svg viewBox="0 0 1 1" preserveAspectRatio="none">
+          <path id="cropDim" fill="rgba(0,0,0,.55)" fill-rule="evenodd" d=""/>
+          <polygon id="cropPoly" fill="none" stroke="#f4a62a" stroke-width="2" vector-effect="non-scaling-stroke" points=""/>
+        </svg>
+        <div class="handle" data-i="0"></div>
+        <div class="handle" data-i="1"></div>
+        <div class="handle" data-i="2"></div>
+        <div class="handle" data-i="3"></div>
+      </div>
+    </div>
   </div>
 
   <div class="controls">
     <div class="controls-inner">
-      <div class="strip"><div class="frames" id="editFrames"></div></div>
-      <div class="sliders" id="sliders"></div>
-      <div class="actions">
-        <button class="ghost" id="resetBtn">Restablecer</button>
-        <button class="ghost" id="invertBtn2" aria-pressed="false">Invertir</button>
-        <button class="btn-primary" id="downloadBtn">Descargar</button>
+      <div id="adjustPanel">
+        <div class="strip"><div class="frames" id="editFrames"></div></div>
+        <div class="sliders" id="sliders"></div>
+        <div class="actions">
+          <button class="ghost" id="resetBtn">Restablecer</button>
+          <button class="ghost" id="invertBtn2" aria-pressed="false">Invertir</button>
+          <button class="ghost" id="cropBtn">Recortar</button>
+        </div>
+        <div class="actions">
+          <button class="btn-primary" id="downloadBtn">Descargar</button>
+        </div>
+      </div>
+      <div id="cropPanel" hidden>
+        <div class="seg">
+          <button id="symBtn" aria-pressed="true">Simétrico</button>
+          <button id="cornerBtn" aria-pressed="false">Esquinas</button>
+        </div>
+        <div class="sliders" id="cropSliders"></div>
+        <p class="crop-help" id="cropHelp" hidden>Arrastrá cada esquina para marcar el recorte. También sirve para enderezar la foto.</p>
+        <div class="actions">
+          <button class="ghost" id="cropResetBtn">Sin recorte</button>
+          <button class="ghost" id="cropCancelBtn">Cancelar</button>
+          <button class="btn-primary" id="cropDoneBtn">Listo</button>
+        </div>
       </div>
     </div>
   </div>
@@ -179,6 +222,7 @@ uniform float uSaturation;  // -1..1
 uniform float uGrain;       // 0..2
 uniform float uTime;
 uniform vec2  uRes;
+uniform mat3  uH;           // recorte / corrección de perspectiva
 
 float luma(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
 vec3 sat(vec3 c, float s){ return mix(vec3(luma(c)), c, s); }
@@ -190,10 +234,11 @@ float hash(vec2 p){
 }
 
 void main(){
-  vec3 c = texture2D(uTex, vUv).rgb;
+  vec3 q3 = uH * vec3(vUv, 1.0);
+  vec3 c = texture2D(uTex, q3.xy / q3.z).rgb;
 
   // Negativo real fotografiado: quitar la máscara naranja (solo C-41) e invertir
-  if(uInvert > 0.5){
+  if(uInvert > 0.5 && uFilter != 3){   // E-6 es diapositiva (positiva): no se invierte
     vec3 base = (uFilter == 2) ? vec3(0.85,0.55,0.35) : vec3(1.0);
     c = 1.0 - clamp(c/base, 0.0, 1.0);
     c = scurve(c, 0.6);
@@ -255,6 +300,7 @@ void main(){
 }`;
 
 /* =============== RENDERER WEBGL =============== */
+const IDENT = new Float32Array([1,0,0, 0,1,0, 0,0,1]);
 class Renderer{
   constructor(canvas){
     this.canvas = canvas;
@@ -289,7 +335,7 @@ class Renderer{
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
     this.u = {};
-    ['uTex','uFilter','uInvert','uExposure','uContrast','uSaturation','uGrain','uTime','uRes']
+    ['uTex','uFilter','uInvert','uExposure','uContrast','uSaturation','uGrain','uTime','uRes','uH']
       .forEach(n => this.u[n] = gl.getUniformLocation(prog,n));
     this.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
   }
@@ -314,6 +360,7 @@ class Renderer{
     gl.uniform1f(u.uGrain, p.grain);
     gl.uniform1f(u.uTime, p.time);
     gl.uniform2f(u.uRes, this.canvas.width, this.canvas.height);
+    gl.uniformMatrix3fv(u.uH, false, p.H || IDENT);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 }
@@ -326,7 +373,7 @@ const FILTERS = [
   {id:3, name:'E-6',      sub:'diapositiva', file:'e6'}
 ];
 const DEFAULTS = {exposure:0, contrast:0, saturation:0, grain:100};
-const state = Object.assign({filter:2, invert:false, facing:'environment'}, DEFAULTS);
+const state = Object.assign({filter:2, invert:true, facing:'environment'}, DEFAULTS);
 
 const SLIDERS = [
   {key:'exposure',   label:'Exposición', min:-2,   max:2,   step:0.05, fmt:v=>(v>0?'+':'')+Number(v).toFixed(2)+' EV'},
@@ -376,19 +423,27 @@ function buildFrames(container){
 }
 function refreshFrames(){
   allFrames.forEach(o=>o.btn.setAttribute('aria-pressed', String(state.filter===o.id)));
+  updateInvertUI();
 }
 buildFrames($('camFrames'));
 buildFrames($('editFrames'));
 
 /* =============== UI: invertir =============== */
+function updateInvertUI(){
+  const off = state.filter===3;            // E-6 no se invierte
+  const on = state.invert && !off;
+  $('invertBtn').setAttribute('aria-pressed', String(on));
+  $('invertBtn2').setAttribute('aria-pressed', String(on));
+  $('invertBtn').querySelector('small').textContent = off ? 'E-6 no se invierte' : 'negativo a positivo';
+}
 function setInvert(v){
   state.invert = v;
-  $('invertBtn').setAttribute('aria-pressed', String(v));
-  $('invertBtn2').setAttribute('aria-pressed', String(v));
+  updateInvertUI();
   if(currentScreen==='edit') scheduleEditDraw();
 }
 $('invertBtn').addEventListener('click', ()=>setInvert(!state.invert));
 $('invertBtn2').addEventListener('click', ()=>setInvert(!state.invert));
+updateInvertUI();
 
 /* =============== UI: sliders =============== */
 const sliderEls = {};
@@ -626,6 +681,47 @@ async function takePhoto(){
 shutter.addEventListener('click', takePhoto);
 
 /* =============== Editor =============== */
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const fullQuad = () => [{x:0,y:0},{x:1,y:0},{x:1,y:1},{x:0,y:1}];   // esquinas: arriba-izq, arriba-der, abajo-der, abajo-izq
+let quad = fullQuad();     // recorte aplicado
+let draft = fullQuad();    // recorte mientras se edita
+let cropMode = false;
+let sym = {x:0, y:0};      // márgenes simétricos en %
+
+// Convierte el recorte (4 esquinas) en la matriz que usa el shader (corrige perspectiva)
+function homography(q){
+  const pts = [q[3], q[2], q[1], q[0]].map(p => ({x:p.x, y:1-p.y}));
+  const [p0,p1,p2,p3] = pts;
+  const dx1=p1.x-p2.x, dx2=p3.x-p2.x, dx3=p0.x-p1.x+p2.x-p3.x;
+  const dy1=p1.y-p2.y, dy2=p3.y-p2.y, dy3=p0.y-p1.y+p2.y-p3.y;
+  let g=0, h=0;
+  if(Math.abs(dx3)>1e-9 || Math.abs(dy3)>1e-9){
+    const den = dx1*dy2 - dx2*dy1;
+    if(Math.abs(den)<1e-12) return IDENT;
+    g = (dx3*dy2 - dx2*dy3)/den;
+    h = (dx1*dy3 - dx3*dy1)/den;
+  }
+  const a=p1.x-p0.x+g*p1.x, b=p3.x-p0.x+h*p3.x, c=p0.x;
+  const d=p1.y-p0.y+g*p1.y, e=p3.y-p0.y+h*p3.y, f=p0.y;
+  return new Float32Array([a,d,g, b,e,h, c,f,1]);
+}
+function quadSize(q, W, H){
+  const dist = (p,r)=>Math.hypot((p.x-r.x)*W, (p.y-r.y)*H);
+  return {
+    w: Math.max(16, (dist(q[0],q[1]) + dist(q[3],q[2]))/2),
+    h: Math.max(16, (dist(q[0],q[3]) + dist(q[1],q[2]))/2)
+  };
+}
+function isConvex(q){
+  let pos=0, neg=0;
+  for(let i=0;i<4;i++){
+    const a=q[i], b=q[(i+1)%4], c=q[(i+2)%4];
+    const cr=(b.x-a.x)*(c.y-b.y)-(b.y-a.y)*(c.x-b.x);
+    if(cr>1e-9) pos++; else if(cr<-1e-9) neg++; else return false;
+  }
+  return pos===4 || neg===4;
+}
+
 function editParams(){
   return {
     filter: state.filter,
@@ -637,21 +733,131 @@ function editParams(){
     time: 0.5
   };
 }
+
+// full=true: tamaño final para descargar; false: tamaño liviano para la pantalla
+function renderEditor(full){
+  if(!snap) return;
+  const q = cropMode ? fullQuad() : quad;
+  const sz = quadSize(q, snap.width, snap.height);
+  const cap = full ? Math.min(editor.maxTex, 4096) : 1600;
+  const s = Math.min(1, cap/Math.max(sz.w, sz.h));
+  const w = Math.max(1, Math.round(sz.w*s)), h = Math.max(1, Math.round(sz.h*s));
+  if(editCanvas.width!==w || editCanvas.height!==h) editor.resize(w,h);
+  editAspect = sz.w/sz.h;
+  if(currentScreen==='edit') fit(editViewport, editStage, editAspect);
+  editor.draw(Object.assign(editParams(), {H: homography(q)}));
+}
+
 let drawQueued = false;
 function scheduleEditDraw(){
   if(drawQueued) return;
   drawQueued = true;
-  requestAnimationFrame(()=>{ drawQueued = false; if(snap && currentScreen==='edit') editor.draw(editParams()); });
+  requestAnimationFrame(()=>{ drawQueued = false; if(snap && currentScreen==='edit') renderEditor(false); });
 }
+
+/* ---- Recorte ---- */
+const overlay = $('cropOverlay'), cropPoly = $('cropPoly'), cropDim = $('cropDim');
+const handles = Array.prototype.slice.call(overlay.querySelectorAll('.handle'));
+
+function drawOverlay(){
+  cropPoly.setAttribute('points', draft.map(p=>p.x+','+p.y).join(' '));
+  cropDim.setAttribute('d', 'M0 0H1V1H0Z M' + draft.map(p=>p.x+' '+p.y).join(' L') + ' Z');
+  handles.forEach((hd,i)=>{ hd.style.left=(draft[i].x*100)+'%'; hd.style.top=(draft[i].y*100)+'%'; });
+}
+handles.forEach(hd=>{
+  let dragging = false;
+  hd.addEventListener('pointerdown', e=>{ dragging = true; hd.setPointerCapture(e.pointerId); e.preventDefault(); });
+  hd.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    const r = editStage.getBoundingClientRect();
+    draft[Number(hd.dataset.i)] = {x:clamp01((e.clientX-r.left)/r.width), y:clamp01((e.clientY-r.top)/r.height)};
+    drawOverlay();
+  });
+  const end = ()=>{ dragging = false; };
+  hd.addEventListener('pointerup', end);
+  hd.addEventListener('pointercancel', end);
+});
+
+// sliders del recorte simétrico
+const symEls = {};
+[{key:'x', label:'Izq. y der.'}, {key:'y', label:'Arriba y abajo'}].forEach(cfg=>{
+  const wrap = document.createElement('label');
+  wrap.className = 'slider';
+  wrap.innerHTML = '<span>'+cfg.label+'</span><input type="range" min="0" max="45" step="0.5" value="0"><output>0%</output>';
+  const input = wrap.querySelector('input'), out = wrap.querySelector('output');
+  input.addEventListener('input', ()=>{ sym[cfg.key] = Number(input.value); out.textContent = input.value+'%'; applySym(); });
+  $('cropSliders').appendChild(wrap);
+  symEls[cfg.key] = {input, out};
+});
+function syncSymSliders(){
+  ['x','y'].forEach(k=>{ symEls[k].input.value = sym[k]; symEls[k].out.textContent = (Math.round(sym[k]*10)/10)+'%'; });
+}
+function applySym(){
+  const mx = sym.x/100, my = sym.y/100;
+  draft = [{x:mx,y:my},{x:1-mx,y:my},{x:1-mx,y:1-my},{x:mx,y:1-my}];
+  drawOverlay();
+}
+function setCropType(t){
+  $('symBtn').setAttribute('aria-pressed', String(t==='sym'));
+  $('cornerBtn').setAttribute('aria-pressed', String(t==='corners'));
+  overlay.classList.toggle('sym', t==='sym');
+  $('cropSliders').hidden = (t!=='sym');
+  $('cropHelp').hidden = (t!=='corners');
+  if(t==='sym') applySym();
+}
+$('symBtn').addEventListener('click', ()=>setCropType('sym'));
+$('cornerBtn').addEventListener('click', ()=>setCropType('corners'));
+
+function isSymRect(q){
+  const e = 1e-6;
+  return Math.abs(q[0].x-q[3].x)<e && Math.abs(q[1].x-q[2].x)<e && Math.abs(q[0].y-q[1].y)<e &&
+         Math.abs(q[2].y-q[3].y)<e && Math.abs(q[0].x-(1-q[1].x))<e && Math.abs(q[0].y-(1-q[2].y))<e;
+}
+function enterCrop(){
+  cropMode = true;
+  draft = quad.map(p=>({x:p.x, y:p.y}));
+  $('adjustPanel').hidden = true;
+  $('cropPanel').hidden = false;
+  overlay.classList.add('on');
+  renderEditor(false);
+  if(isSymRect(quad)){ sym = {x:quad[0].x*100, y:quad[0].y*100}; syncSymSliders(); setCropType('sym'); }
+  else setCropType('corners');
+  drawOverlay();
+}
+function exitCrop(apply){
+  if(apply){
+    const sz = quadSize(draft, snap.width, snap.height);
+    if(!isConvex(draft) || sz.w<32 || sz.h<32){
+      alert('El recorte no es válido: las esquinas se cruzan o el área es muy chica. Acomodalas e intentá de nuevo.');
+      return;
+    }
+    quad = draft.map(p=>({x:p.x, y:p.y}));
+  }
+  cropMode = false;
+  overlay.classList.remove('on');
+  $('cropPanel').hidden = true;
+  $('adjustPanel').hidden = false;
+  renderEditor(false);
+}
+$('cropBtn').addEventListener('click', enterCrop);
+$('cropDoneBtn').addEventListener('click', ()=>exitCrop(true));
+$('cropCancelBtn').addEventListener('click', ()=>exitCrop(false));
+$('cropResetBtn').addEventListener('click', ()=>{
+  sym = {x:0, y:0}; syncSymSliders();
+  draft = fullQuad(); drawOverlay();
+});
 
 function openEditor(){
   stopCamera();
   resetAdjustments();
-  editAspect = snap.width/snap.height;
-  editor.resize(snap.width, snap.height);
+  quad = fullQuad(); draft = fullQuad(); cropMode = false;
+  sym = {x:0, y:0}; syncSymSliders();
+  overlay.classList.remove('on');
+  $('cropPanel').hidden = true;
+  $('adjustPanel').hidden = false;
   editor.upload(snap);
   show('edit');
-  editor.draw(editParams());
+  renderEditor(false);
 }
 
 $('backBtn').addEventListener('click', ()=>{
@@ -662,8 +868,9 @@ $('backBtn').addEventListener('click', ()=>{
 /* =============== Descargar =============== */
 async function download(){
   if(!snap) return;
-  editor.draw(editParams());
+  renderEditor(true);                                     // tamaño final
   const blob = await new Promise(r=>editCanvas.toBlob(r, 'image/jpeg', 0.95));
+  renderEditor(false);                                    // vuelve al tamaño de pantalla
   if(!blob) return;
   const f = FILTERS[state.filter];
   const name = 'negativo-'+f.file+'-'+Date.now()+'.jpg';
