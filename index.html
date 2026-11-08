@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Negativo · cámara con filtros de película</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#161412">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#161412;
+    --panel:#1e1b18;
+    --strip:#0b0a09;
+    --hole:#4a433a;
+    --line:#2f2a25;
+    --text:#ece6da;
+    --muted:#9a9185;
+    --amber:#f4a62a;
+    --amber-ink:#1a1204;
+    --font:"Familjen Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+  #video{position:absolute;width:2px;height:2px;opacity:0;pointer-events:none;left:0;top:0}
+
+  .screen{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg)}
+  .screen[hidden]{display:none}
+
+  .top{display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 8px;min-height:48px}
+  .brand{font-weight:700;font-size:18px;letter-spacing:.01em}
+  .back{font-weight:500;font-size:16px;padding:6px 10px 6px 0;color:var(--text)}
+
+  .viewport{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;background:#0e0d0c}
+  .stage{position:relative;background:#000;overflow:hidden;box-shadow:0 0 0 1px #2a2622}
+  .stage canvas{display:block;width:100%;height:100%}
+
+  .msg{position:absolute;inset:0;display:flex;flex-direction:column;gap:14px;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--muted);font-size:16px;line-height:1.45}
+  .msg[hidden]{display:none}
+  .msg p{margin:0;max-width:30ch}
+  .btn-primary{background:var(--amber);color:var(--amber-ink);font-weight:700;padding:12px 22px;border-radius:6px}
+
+  /* escáner */
+  .scan{position:absolute;inset:0;pointer-events:none;display:none}
+  .scan.on{display:block}
+  .scan-fill{position:absolute;left:0;right:0;top:0;height:0;background:linear-gradient(to bottom,rgba(255,200,120,0),rgba(255,205,130,.22))}
+  .scan-rest{position:absolute;left:0;right:0;bottom:0;height:100%;background:rgba(10,8,6,.5)}
+  .scan-bar{position:absolute;left:-2%;right:-2%;top:0;height:3px;transform:translateY(-50%);background:#fff7e3;
+    box-shadow:0 0 12px 5px rgba(255,196,100,.9),0 0 46px 20px rgba(255,150,30,.4)}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+  .flash.go{animation:flash .22s ease-out}
+  @keyframes flash{0%{opacity:.85}100%{opacity:0}}
+
+  .controls{background:var(--panel);border-top:1px solid var(--line);padding:0 0 calc(env(safe-area-inset-bottom,0px) + 12px)}
+  .controls-inner{max-width:560px;margin:0 auto}
+
+  /* tira de película: selector de filtros */
+  .strip{position:relative;margin:0;padding:18px 8px;background:var(--strip)}
+  .strip::before,.strip::after{content:"";position:absolute;left:0;right:0;height:7px;
+    background:repeating-linear-gradient(90deg,var(--hole) 0 9px,transparent 9px 18px);opacity:.9}
+  .strip::before{top:5px}
+  .strip::after{bottom:5px}
+  .frames{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .frame{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:8px 2px;border:1.5px solid #3a342d;border-radius:3px;background:#17140f;color:var(--muted)}
+  .frame b{font-size:17px;font-weight:700;color:var(--text)}
+  .frame small{font-size:12px}
+  .frame[aria-pressed="true"]{border-color:var(--amber);background:#2a2011}
+  .frame[aria-pressed="true"] b{color:var(--amber)}
+
+  .row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:12px 18px 4px}
+  .side{display:flex;flex-direction:column;align-items:flex-start;gap:1px;font-weight:600;font-size:15px;padding:8px 0;max-width:120px}
+  .side small{font-weight:400;font-size:12px;color:var(--muted)}
+  .side:last-child{align-items:flex-end;text-align:right}
+  .side[aria-pressed="true"]{color:var(--amber)}
+  .side[aria-pressed="true"] small{color:var(--amber)}
+
+  .shutter{width:76px;height:76px;border-radius:50%;border:4px solid var(--text);display:flex;align-items:center;justify-content:center;transition:transform .1s}
+  .shutter span{width:56px;height:56px;border-radius:50%;background:var(--text);display:block}
+  .shutter:active{transform:scale(.93)}
+  .shutter:disabled{opacity:.4}
+
+  /* editor */
+  .sliders{display:grid;gap:2px;padding:12px 18px 4px}
+  .slider{display:grid;grid-template-columns:92px 1fr 64px;align-items:center;gap:10px;font-size:15px}
+  .slider output{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}
+  .slider input{width:100%;accent-color:var(--amber);height:34px;margin:0}
+  .actions{display:flex;gap:10px;padding:10px 18px 4px;align-items:center}
+  .actions .btn-primary{flex:1;font-size:16px}
+  .ghost{padding:12px 14px;border:1.5px solid #3a342d;border-radius:6px;font-weight:500;font-size:15px}
+  .ghost[aria-pressed="true"]{border-color:var(--amber);color:var(--amber)}
+</style>
+</head>
+<body>
+
+<video id="video" playsinline muted autoplay></video>
+
+<!-- PANTALLA: CÁMARA -->
+<section id="camScreen" class="screen">
+  <header class="top"><span class="brand">Negativo</span></header>
+
+  <div class="viewport" id="camViewport">
+    <div class="stage" id="camStage">
+      <canvas id="camCanvas"></canvas>
+      <div class="scan" id="scan">
+        <div class="scan-fill" id="scanFill"></div>
+        <div class="scan-rest" id="scanRest"></div>
+        <div class="scan-bar" id="scanBar"></div>
+      </div>
+      <div class="flash" id="flash"></div>
+    </div>
+    <div class="msg" id="camMsg">
+      <p id="camMsgText">Iniciando cámara…</p>
+      <button class="btn-primary" id="retryBtn" hidden>Activar cámara</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="controls-inner">
+      <div class="strip"><div class="frames" id="camFrames"></div></div>
+      <div class="row">
+        <button class="side" id="invertBtn" aria-pressed="false">Invertir<small>para negativos reales</small></button>
+        <button class="shutter" id="shutter" aria-label="Sacar foto"><span></span></button>
+        <button class="side" id="flipBtn">Girar<small>cambiar cámara</small></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PANTALLA: EDITOR -->
+<section id="editScreen" class="screen" hidden>
+  <header class="top">
+    <button class="back" id="backBtn">‹ Volver a la cámara</button>
+  </header>
+
+  <div class="viewport" id="editViewport">
+    <div class="stage" id="editStage"><canvas id="editCanvas"></canvas></div>
+  </div>
+
+  <div class="controls">
+    <div class="controls-inner">
+      <div class="strip"><div class="frames" id="editFrames"></div></div>
+      <div class="sliders" id="sliders"></div>
+      <div class="actions">
+        <button class="ghost" id="resetBtn">Restablecer</button>
+        <button class="ghost" id="invertBtn2" aria-pressed="false">Invertir</button>
+        <button class="btn-primary" id="downloadBtn">Descargar</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+'use strict';
+
+/* =============== SHADERS =============== */
+const VERT = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main(){ vUv = aPos*0.5+0.5; gl_Position = vec4(aPos,0.0,1.0); }`;
+
+const FRAG = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform int   uFilter;      // 0 original, 1 B&N, 2 C-41, 3 E-6
+uniform float uInvert;      // 1 = invertir negativo real
+uniform float uExposure;    // en pasos (EV)
+uniform float uContrast;    // -1..1
+uniform float uSaturation;  // -1..1
+uniform float uGrain;       // 0..2
+uniform float uTime;
+uniform vec2  uRes;
+
+float luma(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
+vec3 sat(vec3 c, float s){ return mix(vec3(luma(c)), c, s); }
+vec3 scurve(vec3 c, float a){ c = clamp(c,0.0,1.0); return mix(c, c*c*(3.0-2.0*c), a); }
+float hash(vec2 p){
+  vec3 p3 = fract(vec3(p.xyx)*0.1031);
+  p3 += dot(p3, p3.yzx+33.33);
+  return fract((p3.x+p3.y)*p3.z);
+}
+
+void main(){
+  vec3 c = texture2D(uTex, vUv).rgb;
+
+  // Negativo real fotografiado: quitar la máscara naranja (solo C-41) e invertir
+  if(uInvert > 0.5){
+    vec3 base = (uFilter == 2) ? vec3(0.85,0.55,0.35) : vec3(1.0);
+    c = 1.0 - clamp(c/base, 0.0, 1.0);
+    c = scurve(c, 0.6);
+  }
+
+  c *= exp2(uExposure);
+  c = clamp(c, 0.0, 1.0);
+
+  float vig = 0.0;
+  float grain = 0.0;
+  float colorGrain = 0.0;
+
+  if(uFilter == 1){
+    // B&N: contraste fuerte, negros profundos, grano marcado
+    float l = luma(c);
+    l = scurve(vec3(l), 0.9).r;
+    l = clamp((l-0.04)/0.93, 0.0, 1.0);
+    c = vec3(l);
+    vig = 1.0; grain = 0.11;
+  } else if(uFilter == 2){
+    // C-41: negros levantados, sombras verdosas, luces cálidas, color suave
+    float l = luma(c);
+    c = scurve(c, 0.3);
+    c = c*0.93 + 0.04;
+    c += vec3(-0.012,0.014,0.02) * (1.0-l)*(1.0-l);
+    c += vec3(0.04,0.014,-0.035) * l*l;
+    c = sat(c, 1.12);
+    vig = 0.6; grain = 0.075; colorGrain = 0.6;
+  } else if(uFilter == 3){
+    // E-6 (diapositiva): saturación alta, contraste fuerte, azules profundos
+    c = scurve(c, 0.85);
+    float l = luma(c);
+    c = sat(c, 1.45);
+    c *= vec3(1.02,1.0,1.05);
+    c = clamp((c-0.02)/0.97, 0.0, 1.0);
+    c.b += 0.02*(1.0-l)*(1.0-l);
+    vig = 0.8; grain = 0.04; colorGrain = 0.3;
+  }
+
+  // Ajustes del usuario
+  c = (c-0.5)*(1.0+uContrast)+0.5;
+  c = sat(c, 1.0+uSaturation);
+
+  // Viñeteo
+  float d = length(vUv-0.5);
+  c *= 1.0 - 0.28*vig*smoothstep(0.3,0.78,d);
+
+  // Grano (tamaño constante respecto a la imagen)
+  if(grain > 0.0){
+    vec2 gp = floor(vUv*vec2(uRes.x/uRes.y*900.0, 900.0));
+    float n  = hash(gp + uTime*37.0) - 0.5;
+    vec3 n3  = vec3(n, hash(gp+uTime*37.0+17.3)-0.5, hash(gp+uTime*37.0+41.7)-0.5);
+    float lm = luma(c);
+    float w  = 1.0 - 0.7*pow(abs(lm*2.0-1.0), 2.0);
+    c += mix(vec3(n), n3, colorGrain) * grain * uGrain * w * 2.0;
+  }
+
+  gl_FragColor = vec4(clamp(c,0.0,1.0), 1.0);
+}`;
+
+/* =============== RENDERER WEBGL =============== */
+class Renderer{
+  constructor(canvas){
+    this.canvas = canvas;
+    const opts = {preserveDrawingBuffer:true, antialias:false, alpha:false};
+    const gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+    if(!gl) throw new Error('Este navegador no soporta WebGL.');
+    this.gl = gl;
+    const prog = gl.createProgram();
+    [[gl.VERTEX_SHADER,VERT],[gl.FRAGMENT_SHADER,FRAG]].forEach(([type,src])=>{
+      const s = gl.createShader(type);
+      gl.shaderSource(s,src); gl.compileShader(s);
+      if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.attachShader(prog,s);
+    });
+    gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog,'aPos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+
+    this.tex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    this.u = {};
+    ['uTex','uFilter','uInvert','uExposure','uContrast','uSaturation','uGrain','uTime','uRes']
+      .forEach(n => this.u[n] = gl.getUniformLocation(prog,n));
+    this.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  }
+  resize(w,h){
+    this.canvas.width = w; this.canvas.height = h;
+    this.gl.viewport(0,0,w,h);
+  }
+  upload(src){
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+  }
+  draw(p){
+    const gl = this.gl, u = this.u;
+    gl.uniform1i(u.uTex, 0);
+    gl.uniform1i(u.uFilter, p.filter);
+    gl.uniform1f(u.uInvert, p.invert);
+    gl.uniform1f(u.uExposure, p.exposure);
+    gl.uniform1f(u.uContrast, p.contrast);
+    gl.uniform1f(u.uSaturation, p.saturation);
+    gl.uniform1f(u.uGrain, p.grain);
+    gl.uniform1f(u.uTime, p.time);
+    gl.uniform2f(u.uRes, this.canvas.width, this.canvas.height);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+}
+
+/* =============== ESTADO =============== */
+const FILTERS = [
+  {id:0, name:'Original', sub:'sin filtro',  file:'original'},
+  {id:1, name:'B&N',      sub:'negativo',    file:'bn'},
+  {id:2, name:'C-41',     sub:'color',       file:'c41'},
+  {id:3, name:'E-6',      sub:'diapositiva', file:'e6'}
+];
+const DEFAULTS = {exposure:0, contrast:0, saturation:0, grain:100};
+const state = Object.assign({filter:2, invert:false, facing:'environment'}, DEFAULTS);
+
+const SLIDERS = [
+  {key:'exposure',   label:'Exposición', min:-2,   max:2,   step:0.05, fmt:v=>(v>0?'+':'')+Number(v).toFixed(2)+' EV'},
+  {key:'contrast',   label:'Contraste',  min:-60,  max:100, step:1,    fmt:v=>(v>0?'+':'')+v},
+  {key:'saturation', label:'Saturación', min:-100, max:100, step:1,    fmt:v=>(v>0?'+':'')+v},
+  {key:'grain',      label:'Grano',      min:0,    max:200, step:1,    fmt:v=>v+'%'}
+];
+
+/* =============== ELEMENTOS =============== */
+const $ = id => document.getElementById(id);
+const video = $('video');
+const camScreen = $('camScreen'), editScreen = $('editScreen');
+const camViewport = $('camViewport'), camStage = $('camStage'), camCanvas = $('camCanvas');
+const editViewport = $('editViewport'), editStage = $('editStage'), editCanvas = $('editCanvas');
+const camMsg = $('camMsg'), camMsgText = $('camMsgText'), retryBtn = $('retryBtn');
+const scan = $('scan'), scanBar = $('scanBar'), scanFill = $('scanFill'), scanRest = $('scanRest'), flash = $('flash');
+const shutter = $('shutter');
+
+let preview, editor;
+try{
+  preview = new Renderer(camCanvas);
+  editor  = new Renderer(editCanvas);
+}catch(err){
+  camMsg.hidden = false;
+  camMsgText.textContent = 'No se pudo iniciar WebGL: ' + err.message;
+  throw err;
+}
+
+let stream = null, cameraReady = false, frozen = false, busy = false;
+let currentScreen = 'cam';
+let lastVW = 0, lastVH = 0;
+let camAspect = 16/9, editAspect = 4/3;
+let snap = null;
+
+/* =============== UI: tiras de filtros =============== */
+const allFrames = [];
+function buildFrames(container){
+  FILTERS.forEach(f=>{
+    const b = document.createElement('button');
+    b.className = 'frame';
+    b.setAttribute('aria-pressed', String(state.filter===f.id));
+    b.innerHTML = '<b>'+f.name+'</b><small>'+f.sub+'</small>';
+    b.addEventListener('click', ()=>{ state.filter = f.id; refreshFrames(); if(currentScreen==='edit') scheduleEditDraw(); });
+    container.appendChild(b);
+    allFrames.push({btn:b, id:f.id});
+  });
+}
+function refreshFrames(){
+  allFrames.forEach(o=>o.btn.setAttribute('aria-pressed', String(state.filter===o.id)));
+}
+buildFrames($('camFrames'));
+buildFrames($('editFrames'));
+
+/* =============== UI: invertir =============== */
+function setInvert(v){
+  state.invert = v;
+  $('invertBtn').setAttribute('aria-pressed', String(v));
+  $('invertBtn2').setAttribute('aria-pressed', String(v));
+  if(currentScreen==='edit') scheduleEditDraw();
+}
+$('invertBtn').addEventListener('click', ()=>setInvert(!state.invert));
+$('invertBtn2').addEventListener('click', ()=>setInvert(!state.invert));
+
+/* =============== UI: sliders =============== */
+const sliderEls = {};
+SLIDERS.forEach(s=>{
+  const wrap = document.createElement('label');
+  wrap.className = 'slider';
+  wrap.innerHTML = '<span>'+s.label+'</span><input type="range" min="'+s.min+'" max="'+s.max+'" step="'+s.step+'" value="'+state[s.key]+'"><output></output>';
+  const input = wrap.querySelector('input'), out = wrap.querySelector('output');
+  const upd = ()=>{ out.textContent = s.fmt(Number(input.value)); };
+  input.addEventListener('input', ()=>{ state[s.key] = Number(input.value); upd(); scheduleEditDraw(); });
+  upd();
+  $('sliders').appendChild(wrap);
+  sliderEls[s.key] = {input, upd};
+});
+function resetAdjustments(){
+  Object.assign(state, DEFAULTS);
+  SLIDERS.forEach(s=>{ sliderEls[s.key].input.value = state[s.key]; sliderEls[s.key].upd(); });
+}
+$('resetBtn').addEventListener('click', ()=>{ resetAdjustments(); scheduleEditDraw(); });
+
+/* =============== Layout =============== */
+function fit(viewport, stage, aspect){
+  const r = viewport.getBoundingClientRect();
+  if(!r.width || !r.height) return;
+  let w = r.width, h = w/aspect;
+  if(h > r.height){ h = r.height; w = h*aspect; }
+  stage.style.width = Math.floor(w)+'px';
+  stage.style.height = Math.floor(h)+'px';
+}
+function refit(){
+  if(currentScreen==='cam') fit(camViewport, camStage, camAspect);
+  else fit(editViewport, editStage, editAspect);
+}
+window.addEventListener('resize', refit);
+window.addEventListener('orientationchange', ()=>setTimeout(refit,200));
+
+function show(which){
+  currentScreen = which;
+  camScreen.hidden = which!=='cam';
+  editScreen.hidden = which!=='edit';
+  refit();
+}
+
+/* =============== Cámara =============== */
+function stopCamera(){
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; }
+  video.srcObject = null;
+  cameraReady = false;
+}
+
+async function startCamera(){
+  stopCamera();
+  frozen = false; lastVW = 0; lastVH = 0;
+  retryBtn.hidden = true;
+  camMsg.hidden = false;
+  camMsgText.textContent = 'Iniciando cámara…';
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    camMsgText.textContent = 'Este navegador no permite usar la cámara. Abrí la página con https (GitHub Pages ya lo usa) y con un navegador actual.';
+    return;
+  }
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:state.facing}, width:{ideal:2560}, height:{ideal:1440} },
+      audio:false
+    });
+    video.srcObject = stream;
+    await video.play();
+    cameraReady = true;
+    camMsg.hidden = true;
+  }catch(err){
+    let t = 'No se pudo abrir la cámara.';
+    if(err && (err.name==='NotAllowedError' || err.name==='SecurityError')) t = 'La cámara está bloqueada. Dale permiso al sitio desde el candado de la barra de direcciones y volvé a intentar.';
+    else if(err && err.name==='NotFoundError') t = 'No se encontró ninguna cámara en este dispositivo.';
+    else if(err && err.name==='NotReadableError') t = 'Otra app está usando la cámara. Cerrala y volvé a intentar.';
+    camMsgText.textContent = t;
+    retryBtn.hidden = false;
+  }
+}
+retryBtn.addEventListener('click', startCamera);
+$('flipBtn').addEventListener('click', ()=>{
+  state.facing = state.facing==='environment' ? 'user' : 'environment';
+  startCamera();
+});
+
+/* =============== Bucle de vista previa =============== */
+function previewParams(t){
+  return {filter:state.filter, invert:state.invert?1:0, exposure:0, contrast:0, saturation:0, grain:1, time:t};
+}
+function loop(){
+  requestAnimationFrame(loop);
+  if(currentScreen!=='cam' || !cameraReady || frozen) return;
+  if(video.readyState < 2 || !video.videoWidth) return;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if(vw!==lastVW || vh!==lastVH){
+    lastVW = vw; lastVH = vh;
+    const s = Math.min(1, 960/Math.max(vw,vh));
+    preview.resize(Math.round(vw*s), Math.round(vh*s));
+    camAspect = vw/vh;
+    refit();
+  }
+  preview.upload(video);
+  preview.draw(previewParams((performance.now()/1000)%100));
+}
+requestAnimationFrame(loop);
+
+/* =============== Sonido de escáner (sintetizado) =============== */
+let audioCtx = null, noiseBuf = null;
+function getNoise(ctx){
+  if(noiseBuf) return noiseBuf;
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+  return noiseBuf;
+}
+function clack(ctx, t){
+  const s = ctx.createBufferSource(); s.buffer = getNoise(ctx);
+  const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value = 1200;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.8, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t+0.07);
+  s.connect(hp); hp.connect(g); g.connect(ctx.destination);
+  s.start(t); s.stop(t+0.08);
+}
+function playScanner(dur){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    audioCtx = audioCtx || new AC();
+    const ctx = audioCtx;
+    if(ctx.state==='suspended') ctx.resume();
+    const t0 = ctx.currentTime + 0.03, t1 = t0 + dur;
+
+    const master = ctx.createGain();
+    master.connect(ctx.destination);
+    master.gain.setValueAtTime(0.0001, t0);
+    master.gain.exponentialRampToValueAtTime(0.55, t0+0.12);
+    master.gain.setValueAtTime(0.55, t1-0.2);
+    master.gain.exponentialRampToValueAtTime(0.0001, t1);
+
+    // motor del carro
+    const motor = ctx.createOscillator(); motor.type = 'sawtooth';
+    motor.frequency.setValueAtTime(60, t0);
+    motor.frequency.linearRampToValueAtTime(118, t0+0.35);
+    motor.frequency.linearRampToValueAtTime(126, t1);
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value = 800;
+    const gm = ctx.createGain(); gm.gain.value = 0.28;
+    motor.connect(lp); lp.connect(gm); gm.connect(master);
+
+    // traqueteo del paso a paso
+    const step = ctx.createOscillator(); step.type = 'square'; step.frequency.value = 44;
+    const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value = 1500; bp.Q.value = 2;
+    const gs = ctx.createGain(); gs.gain.value = 0.10;
+    step.connect(bp); bp.connect(gs); gs.connect(master);
+
+    // soplido de la lámpara / barrido
+    const n = ctx.createBufferSource(); n.buffer = getNoise(ctx); n.loop = true;
+    const nbp = ctx.createBiquadFilter(); nbp.type='bandpass'; nbp.Q.value = 0.8;
+    nbp.frequency.setValueAtTime(1800, t0);
+    nbp.frequency.linearRampToValueAtTime(3200, t1);
+    const gn = ctx.createGain(); gn.gain.value = 0.07;
+    n.connect(nbp); nbp.connect(gn); gn.connect(master);
+
+    [motor, step, n].forEach(s=>{ s.start(t0); s.stop(t1+0.05); });
+    clack(ctx, t0);
+    clack(ctx, t1-0.05);
+  }catch(e){ /* sin sonido, no pasa nada */ }
+}
+
+/* =============== Sacar foto + efecto escáner =============== */
+const DEFAULT_SCAN_MS = 1800;
+const SOUND_FILE = 'scanner.mp3';   // subí tu mp3 al repositorio con este nombre
+let customBuf = null;
+
+async function loadCustomSound(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    audioCtx = audioCtx || new AC();
+    const res = await fetch(SOUND_FILE);
+    if(!res.ok) return;
+    const data = await res.arrayBuffer();
+    customBuf = await new Promise((ok, fail)=>audioCtx.decodeAudioData(data, ok, fail));
+  }catch(e){ customBuf = null; }
+}
+function playCustom(){
+  const ctx = audioCtx;
+  if(ctx.state==='suspended') ctx.resume();
+  const s = ctx.createBufferSource();
+  s.buffer = customBuf;
+  s.connect(ctx.destination);
+  s.start();
+}
+loadCustomSound();
+
+function runScan(ms){
+  return new Promise(resolve=>{
+    scan.classList.add('on');
+    const t0 = performance.now();
+    function step(now){
+      const p = Math.min(1, (now-t0)/ms);
+      scanBar.style.top = (p*100)+'%';
+      scanFill.style.height = (p*100)+'%';
+      scanRest.style.height = ((1-p)*100)+'%';
+      if(p<1) requestAnimationFrame(step);
+      else setTimeout(()=>{ scan.classList.remove('on'); resolve(); }, 180);
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+async function takePhoto(){
+  if(busy || !cameraReady || frozen) return;
+  if(video.readyState < 2 || !video.videoWidth) return;
+  busy = true; shutter.disabled = true;
+
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const cap = Math.min(editor.maxTex, 4096);
+  const s = Math.min(1, cap/Math.max(vw,vh));
+  const c = document.createElement('canvas');
+  c.width = Math.round(vw*s); c.height = Math.round(vh*s);
+  c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+  snap = c;
+  frozen = true;
+
+  flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+  const useCustom = !!customBuf;
+  const scanMs = useCustom ? Math.min(8000, Math.max(800, customBuf.duration*1000)) : DEFAULT_SCAN_MS;
+  if(useCustom) playCustom(); else playScanner(scanMs/1000);
+  await runScan(scanMs);
+
+  openEditor();
+  busy = false; shutter.disabled = false;
+}
+shutter.addEventListener('click', takePhoto);
+
+/* =============== Editor =============== */
+function editParams(){
+  return {
+    filter: state.filter,
+    invert: state.invert?1:0,
+    exposure: state.exposure,
+    contrast: state.contrast/100,
+    saturation: state.saturation/100,
+    grain: state.grain/100,
+    time: 0.5
+  };
+}
+let drawQueued = false;
+function scheduleEditDraw(){
+  if(drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(()=>{ drawQueued = false; if(snap && currentScreen==='edit') editor.draw(editParams()); });
+}
+
+function openEditor(){
+  stopCamera();
+  resetAdjustments();
+  editAspect = snap.width/snap.height;
+  editor.resize(snap.width, snap.height);
+  editor.upload(snap);
+  show('edit');
+  editor.draw(editParams());
+}
+
+$('backBtn').addEventListener('click', ()=>{
+  show('cam');
+  startCamera();
+});
+
+/* =============== Descargar =============== */
+async function download(){
+  if(!snap) return;
+  editor.draw(editParams());
+  const blob = await new Promise(r=>editCanvas.toBlob(r, 'image/jpeg', 0.95));
+  if(!blob) return;
+  const f = FILTERS[state.filter];
+  const name = 'negativo-'+f.file+'-'+Date.now()+'.jpg';
+  const file = new File([blob], name, {type:'image/jpeg'});
+
+  // En iPhone/iPad se abre el menú de compartir (ahí aparece "Guardar imagen")
+  if(/iPhone|iPad|iPod/.test(navigator.userAgent) && navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file]}); return; }
+    catch(e){ if(e && e.name==='AbortError') return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+$('downloadBtn').addEventListener('click', download);
+
+/* =============== Inicio =============== */
+startCamera();
+
+})();
+</script>
+</body>
+</html>
